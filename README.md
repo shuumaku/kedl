@@ -14,7 +14,7 @@ Kyocera has implemented vendor commands in EDL, let's use them!
 - Dump: Extract individual partitions or create full-disk (sector by sector) eMMC dumps.
 - Flashing: Flash specific partitions or flash a complete eMMC backup.
 - Hardware Operations: Clear write protection (`0xAB`), run region erasures (`0xA5`), and issue hardware resets (`0x0D`).
-- Integrity Verification\*\*: Calculate and compare local file dynamic checksums directly against hardware-calculated partition checksums (`0xA7`).
+- Integrity Verification: Calculate and compare local file dynamic checksums directly against hardware-calculated partition checksums (`0xA7`).
 - Sector Peek: Read an arbitrary byte count from the start of a raw eMMC sector (`0xA3`), without a full-sector aligned read.
 
 ---
@@ -45,9 +45,6 @@ To enter RAMDUMP mode, you have 2 methods:
 It will connect with a device `KYOCERA_Android Android` and the notification LED will be green (if LED exists).
 
 ### To exit from RAMDUMP, remove the SD card and reboot the phone.
-
-> [!WARNING]
-> If your device has Secureboot ON, or you have Android 7+, flashing partitions might result in the system not being able to boot because of verification.
 
 # Usage:
 
