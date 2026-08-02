@@ -235,12 +235,19 @@ class KyoceraSahara(Sahara):
 
     def drain_in(self, location: str, count: int = 0, attempts: int = 1, timeout: int = 1) -> Optional[bytes]:
         buffer = bytearray()
+        length = min(self._cdc.maxsize, count or self._cdc.maxsize)
         for _ in range(attempts):
             try:
-                buf = self._cdc.read(min(self._cdc.maxsize, count or self._cdc.maxsize), timeout)
+                buf = bytes(self._cdc.EP_IN.read(length, timeout))
             except Exception as e:
-                logger.debug(str(e))
-                break
+                error = str(getattr(e, 'strerror', e))
+                if "timed out" not in error:
+                    if "Overflow" in error:
+                        logger.error(f'{location} drain_in USB overflow: {error}')
+                    else:
+                        logger.debug(error)
+                    break
+                logger.debug(error)
             else:
                 buffer.extend(buf)
         response = bytes(buffer)
@@ -343,7 +350,10 @@ class KyoceraSahara(Sahara):
         first = True
         buf = bytearray()
         while len(buf) < total:
-            tmp = self._cdc.read(min(self._cdc.maxsize, total))
+            tmp = self._cdc.read(min(total - len(buf), 1024 * 1024))
+            if not tmp:
+                logger.error('read_raw: no data received, aborting to avoid a stuck loop')
+                return None
             if first and len(tmp) == 16:
                 pkt = self._ch.parse_pkt(tmp)
                 if pkt.cmd == SaharaCmd.END_TRANSFER:
@@ -664,18 +674,24 @@ class Qdl:
     def is_secureboot_enabled(self) -> bool:
         return self._sahara.vendor_cmd_b5_read_secureboot()
 
-    def raw_dump_emmc(self, output_path: Path, total_sectors: int = 15269888, chunk_size: int = 256):
+    def raw_dump_emmc(self, output_path: Path, total_sectors: int = 15269888, chunk_size: int = 256) -> bool:
         logger.info("Starting full eMMC raw dump...")
         sectors_read = 0
         start_lba = 0
+        start_time = time.time()
 
         with open(output_path, "wb") as f:
             while sectors_read < total_sectors:
                 to_read = min(chunk_size, total_sectors - sectors_read)
                 current_lba = start_lba + sectors_read
-                
+
                 pct = (sectors_read / total_sectors) * 100
-                print(f"  Progress: {pct:.2f}% ({sectors_read}/{total_sectors} sectors) | LBA: {current_lba}", end="\r")
+                elapsed = time.time() - start_time
+                sec_per_s = sectors_read / elapsed if elapsed > 0 else 0
+                mb_per_s = sec_per_s * 512 / (1024 * 1024)
+                eta = (total_sectors - sectors_read) / sec_per_s if sec_per_s > 0 else float('inf')
+                print(f"  Read progress: {pct:.2f}% ({sectors_read}/{total_sectors} sectors) | LBA: {current_lba} | "
+                      f"{sec_per_s:.0f} sectors/s ({mb_per_s:.2f} MB/s) | ETA: {format_eta(eta)}", end="\r")
                 
                 chunk = self._sahara.vendor_cmd_b9_read_raw(current_lba, to_read)
                 if chunk is None:
@@ -688,8 +704,10 @@ class Qdl:
         if sectors_read == total_sectors:
             print(f"\n  Progress: 100.00% ({total_sectors}/{total_sectors} sectors)")
             logger.info(f"Successfully dumped entire eMMC to {output_path}")
+            return True
         else:
             logger.error(f"Incomplete dump. Saved up to sector {sectors_read}.")
+            return False
 
     def raw_write_emmc(self, input_path: Path, chunk_sectors: int = 2048):
         if not input_path.exists():
@@ -708,6 +726,7 @@ class Qdl:
 
         sectors_written = 0
         chunk_bytes = chunk_sectors * 512
+        start_time = time.time()
 
         with open(input_path, "rb") as f:
             while sectors_written < total_sectors:
@@ -715,10 +734,15 @@ class Qdl:
                 data_chunk = f.read(chunk_bytes)
                 if not data_chunk:
                     break
-                
+
                 actual_sectors = len(data_chunk) // 512
                 pct = (sectors_written / total_sectors) * 100
-                print(f"  Flash Progress: {pct:.2f}% ({sectors_written}/{total_sectors} sectors) | LBA: {current_lba}", end="\r")
+                elapsed = time.time() - start_time
+                sec_per_s = sectors_written / elapsed if elapsed > 0 else 0
+                mb_per_s = sec_per_s * 512 / (1024 * 1024)
+                eta = (total_sectors - sectors_written) / sec_per_s if sec_per_s > 0 else float('inf')
+                print(f"  Flash progress: {pct:.2f}% ({sectors_written}/{total_sectors} sectors) | LBA: {current_lba} | "
+                      f"{sec_per_s:.0f} sectors/s ({mb_per_s:.2f} MB/s) | ETA: {format_eta(eta)}", end="\r")
 
                 if not self._sahara.vendor_cmd_ba_write_raw(current_lba, data_chunk):
                     print(f"\n  [ERROR] Failed flashing raw sector array sequence at LBA {current_lba}. Restoration aborted.")
@@ -733,6 +757,17 @@ class Qdl:
         else:
             logger.error("Incomplete structural raw disk validation sync occurred.")
             return False
+
+
+def format_eta(seconds: float) -> str:
+    if seconds <= 0 or seconds == float('inf'):
+        return "--:--"
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
 
 
 def checksum_file(filepath: str, offset: int = 0, length: int = None) -> int:
@@ -894,12 +929,12 @@ def handle_verify(qdl: Qdl, args):
 
 
 def handle_peek(qdl: Qdl, args):
-    data = qdl.peek_sector(args.lba, args.count)
+    data = qdl.peek_sector(args.sector_lba, args.count)
     if data is None:
         logger.error("Peek failed.")
         return
     ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in data)
-    print(f"Sector (LBA) {args.lba}, {len(data)} bytes:")
+    print(f"Sector (LBA) {args.sector_lba}, {len(data)} bytes:")
     print(data.hex())
     print(f"ascii: {ascii_repr}")
     if args.output:
@@ -1007,7 +1042,7 @@ against a hardware-calculated checksum of the partition on the device.
         help="Read the first N bytes of a raw eMMC sector (vendor cmd 0xA3).",
         description="""
 [peek]
-Reads the first `count` bytes of eMMC sector `lba` using the Kyocera vendor
+Reads the first `count` bytes of eMMC sector `lba` using the vendor
 0xA3 command - a lightweight alternative to a full 0xB9 sector read.
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1040,6 +1075,7 @@ Reads the first `count` bytes of eMMC sector `lba` using the Kyocera vendor
         }
         dispatch_map[args.action](qdl, args)
     finally:
+        print("\n")
         qdl.disconnect()
 
 if __name__ == '__main__':

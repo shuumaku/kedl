@@ -23,12 +23,24 @@ Kyocera has implemented vendor commands in EDL, let's use them!
 
 Ensure you have Python 3.8+ installed along with `libusb` dependencies required by `pyusb` / `usblib`.
 
+Generally, in Linux:
+
+```shell
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install pyusb usblib
+```
+
 ## Entering RAMDUMP mode:
 
 To enter RAMDUMP mode, you have 2 methods:
 
-1.  create a FAT/FAT32 formatted SDCard with a text file called `NOTPUSH`, with the string `DEVKEYDL` inside it.
-2.  use a deepflash cable.
+1. Create a FAT/FAT32 formatted SD Card with a file named `NOTPUSH`, with the contents `DEVKEYDL` inside it. This SD card trigger is _persistent RAMDUMP mode_ (i.e across reboots)
+
+> [!NOTE]
+> On Linux/MacOS, you can run `echo "DEVKEYDL" > "NOTPUSH"` in the root directory of the SD card.
+
+2. use a deepflash cable.
 
 It will connect with a device `KYOCERA_Android Android` and the notification LED will be green (if LED exists).
 
@@ -65,12 +77,14 @@ It will connect with a device `KYOCERA_Android Android` and the notification LED
 
 > [!NOTE]
 > Your device may have a different VID/PID, and may not be detected. For such cases use `lsusb -v` to check your specific IDs.
-> For example on KYF31 the output is as such: `Bus 003 Device 011: ID 0482:0a7f Kyocera Corp. KYOCERA_Android` which would mean you'd specify `--vid 0482 --pid 0a7f` in the commands. (this is the default VID/PID)
+> For example on KYF31 the output is as such: `ID 0482:0a7f Kyocera Corp. KYOCERA_Android` which would mean you'd specify `--vid 0482 --pid 0a7f` in the commands. (this is the default VID/PID)
 
 ---
 
-# Credits:
+# Credits
 
-Original reverse engineering efforts, research and code by @leobuskin.
+Original reverse engineering efforts, research and code by [@leobuskin](https://xdaforums.com/m/leobuskin.13248532/#recent-content).
 
 This project uses code derived from or inspired by [bkerler/edl](https://github.com/bkerler/edl) by Bjoern Kerler, and as such is also licensed under GPLv3.
+
+This repository is based on a fork-clone of [sonic011gamer/kedl](https://github.com/sonic011gamer/kedl)
