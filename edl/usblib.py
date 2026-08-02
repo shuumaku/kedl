@@ -322,6 +322,8 @@ class usb_class(DeviceClass):
         buffer = self.buffer[:resplen]
         epr = self.EP_IN.read
         extend = res.extend
+        retries = 0
+        max_retries = 10
         while len(res) < resplen:
             try:
                 resplen = epr(buffer, timeout)
@@ -334,7 +336,8 @@ class usb_class(DeviceClass):
                     if timeout is None:
                         return b""
                     # logger.debug("Timed out")
-                    if timeout == 10:
+                    retries += 1
+                    if retries >= max_retries:
                         return b""
                     timeout += 1
                 elif "Overflow" in error:

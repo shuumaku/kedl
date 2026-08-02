@@ -134,15 +134,12 @@ class Sahara:
 
     def cmd_reset(self):
         try:
-            # Send the reset command; the device will reboot immediately
             self._cdc.write(struct.pack("<II", SaharaCmd.RESET_REQ, 0x8))
             logger.info("Reset command sent. Device is rebooting...")
             
-            # Small pause to allow the OS USB stack to register the hardware detachment
             time.sleep(0.1) 
             return True
         except Exception as e:
-            # If the write or connection drops immediately, it's an expected result of the reset
             logger.debug(f"USB connection severed during reset as expected: {e}")
             return True
 
@@ -213,6 +210,29 @@ class Sahara:
 
 class KyoceraSahara(Sahara):
 
+    # based on SBL1 analysis
+    VendorErrorDesc = {
+        0x0A: "Response send failed: length mismatch",
+        0x0C: "Response send failed: general transmit error",
+        0x17: "Response send failed: timeout/busy",
+        0x50: "Storage driver failed to initialize",
+        0x51: "Low-level read call failed (bad sector count, or driver rejected a zero-length read)",
+        0x52: "Low-level write call failed (bad sector count, or driver rejected a zero-length write)",
+        0x54: "Requested byte/sector count too large for this command",
+        0x57: "0xAF: requested length too large (>= 0xfec)",
+        0x58: "0xAF: info-id lookup failed (unpopulated/invalid id, or id data unavailable)",
+        0x59: "0xB1: requested length too large (>= 0xfec)",
+        0x5A: "0xB1: info-id write call failed",
+    }
+
+    @classmethod
+    def get_vendor_error_desc(cls, status: int) -> str:
+        if status in cls.VendorErrorDesc:
+            return f'Vendor error: {cls.VendorErrorDesc[status]}'
+        if status in ErrorDesc:
+            return f'Error: {ErrorDesc[status]}'
+        return f'Unknown vendor status: 0x{status:02X}'
+
     def drain_in(self, location: str, count: int = 0, attempts: int = 1, timeout: int = 1) -> Optional[bytes]:
         buffer = bytearray()
         for _ in range(attempts):
@@ -243,7 +263,8 @@ class KyoceraSahara(Sahara):
                 logger.info('Write-protect cleared')
                 return True
             elif cmd_id == 0x04:
-                logger.error(f'clear_write_protect error: {resp}')
+                status = struct.unpack("<I", resp[12:16])[0]
+                logger.error(f'clear_write_protect error: {self.get_vendor_error_desc(status)}')
                 return False
             else:
                 logger.warning(f'Unsupported response on clear_write_protect: {resp}')
@@ -281,7 +302,8 @@ class KyoceraSahara(Sahara):
                     logger.error(f'invalid response id: {rid} [{rsp}]')
                     return None
             elif len(rsp) == 16:
-                logger.error(f'error: {rsp}')
+                status = struct.unpack("<I", rsp[12:16])[0]
+                logger.error(f'checksum error: {self.get_vendor_error_desc(status)}')
                 return None
             else:
                 logger.error(f'invalid response length: {len(rsp)}')
@@ -366,7 +388,7 @@ class KyoceraSahara(Sahara):
             if code == 0x04 and rlen == 16:
                 status = p3
                 if status != 0:
-                    logger.error(f"Device reported error on 0xA5: status={status}")
+                    logger.error(f"Device reported error on 0xA5: {self.get_vendor_error_desc(status)}")
                     return False
                 continue
         return True
@@ -395,7 +417,7 @@ class KyoceraSahara(Sahara):
             if len(resp) == 16:
                 cmd_id, rlen, p2, p3 = struct.unpack("<IIII", resp)
                 if cmd_id == 0x04 and p3 != 0x00:
-                    logger.error(f'write_ba error: id=0x{cmd_id:x} len={rlen} p2=0x{p2:x} p3=0x{p3:x}')
+                    logger.error(f'write_ba error: {self.get_vendor_error_desc(p3)}')
                     return False
                 logger.info(f'0xBA ready hdr: id=0x{cmd_id:x} len={rlen} p2=0x{p2:x} p3=0x{p3:x}')
 
@@ -418,18 +440,52 @@ class KyoceraSahara(Sahara):
             if len(resp) == 16:
                 cmd_id, rlen, p2, p3 = struct.unpack("<IIII", resp)
                 if cmd_id == 0x04:
-                    logger.error(f'write_ba error: id=0x{cmd_id:x} len={rlen} p2=0x{p2:x} p3=0x{p3:x}')
+                    logger.error(f'write_ba error: {self.get_vendor_error_desc(p3)}')
                     return False
                 logger.info(f'0xBB ready hdr: id=0x{cmd_id:x} len={rlen} p2=0x{p2:x} p3=0x{p3:x}')
         return True
+
+    def vendor_cmd_a3_peek_sector(self, lba: int, count: int) -> Optional[bytes]:
+        """Read the first `count` bytes of eMMC sector
+        `lba`, starting at byte offset 0. 
+        
+        Unlike 0xB9 (full sector reads),
+        this returns an arbitrary byte count without full-sector alignment"""
+        logger.debug(f'vendor_cmd_a3_peek_sector: peeking {count} bytes from lba:{lba}')
+        self.drain_in('pre')
+        data = struct.pack("<IIII", 0xA3, 16, lba, count)
+        if not self._cdc.write(data):
+            logger.error('failed to send data')
+            return None
+        try:
+            resp = self._cdc.read(16 + count, timeout=max(1000, 200 + count))
+        except Exception as e:
+            logger.error(str(e))
+            return None
+        extra = self.drain_in('post', 0)
+        if extra:
+            resp = resp + extra
+        if len(resp) < 16:
+            logger.error(f'peek_sector error: short response {resp.hex() if resp else resp}')
+            return None
+        rid, _, _, p3 = struct.unpack_from("<IIII", resp, 0)
+        if rid == 0x04:
+            logger.error(f'peek_sector rejected: {self.get_vendor_error_desc(p3)}')
+            return None
+        if rid != 0xA4:
+            logger.warning(f'peek_sector: unexpected response id 0x{rid:X}: {resp.hex()}')
+            return None
+        body = resp[16:16 + count]
+        if len(body) < count:
+            logger.error(f'peek_sector: truncated body, got {len(body)} of {count} bytes')
+            return None
+        return body
 
 
 class Qdl:
 
     # Max sectors per raw 0xB9/0xBA command. Declaring a larger size in a single
-    # command causes the device firmware to error out (Sahara END_TRANSFER) and
-    # reset its session - confirmed reading a 172032-sector partition in one shot.
-    # 256 sectors (128KiB) matches the chunk size raw_dump_emmc already used safely.
+    # command causes the device firmware to error out (Sahara END_TRANSFER)
     PARTITION_CHUNK_SECTORS = 256
 
     def __init__(self, vid: int, pid: int) -> None:
@@ -468,6 +524,9 @@ class Qdl:
                 # Catching expected 'Entity not found' or disconnected bus errors during reset teardown
                 logger.debug(f"USB interface closed with expected disconnect state: {e}")
         self._parts.clear()
+
+    def peek_sector(self, lba: int, count: int) -> Optional[bytes]:
+        return self._sahara.vendor_cmd_a3_peek_sector(lba, count)
 
     def partition_checksum(self, partition: str) -> Optional[int]:
         if partition in self._parts:
@@ -509,7 +568,7 @@ class Qdl:
             n = min(self.PARTITION_CHUNK_SECTORS, remaining)
             chunk = self._sahara.vendor_cmd_b9_read_raw(lba, n)
             if chunk is None:
-                logger.error(f'Failed reading partition {partition} at lba {lba} (n={n})')
+                logger.error(f'Failed reading partition {partition} at sector (lba) {lba} (n={n})')
                 return None
             buf.extend(chunk)
             lba += n
@@ -536,7 +595,7 @@ class Qdl:
             n = min(self.PARTITION_CHUNK_SECTORS, total_sectors - sent_sectors)
             chunk = data[sent_sectors * 512:(sent_sectors + n) * 512]
             if not self._sahara.vendor_cmd_ba_write_raw(lba, chunk):
-                logger.error(f'Failed writing partition {partition} at lba {lba} (n={n})')
+                logger.error(f'Failed writing partition {partition} at sector (lba) {lba} (n={n})')
                 return False
             lba += n
             sent_sectors += n
@@ -724,9 +783,8 @@ def checksum_file(filepath: str, offset: int = 0, length: int = None) -> int:
 def handle_info(qdl: Qdl, args):
     sb_enabled = qdl.is_secureboot_enabled()
     
-    # Format the status to print "On" or "Off" instead of True/False
-    sb_status = "On" if sb_enabled else "Off"
-    print(f"Secureboot {sb_status}")
+    sb_status = "Enforced" if sb_enabled else "Blown"
+    print(f"Secure boot status: {sb_status}")
 
     qdl.read_gpt()
     print(f"{'Index':<6} {'Partition Name':<20} {'LBA Range':<25} {'Sectors':<12} {'Attributes'}")
@@ -835,6 +893,20 @@ def handle_verify(qdl: Qdl, args):
         print("RESULT: CRITICAL WARNING! Mismatched checksum profiles.")
 
 
+def handle_peek(qdl: Qdl, args):
+    data = qdl.peek_sector(args.lba, args.count)
+    if data is None:
+        logger.error("Peek failed.")
+        return
+    ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in data)
+    print(f"Sector (LBA) {args.lba}, {len(data)} bytes:")
+    print(data.hex())
+    print(f"ascii: {ascii_repr}")
+    if args.output:
+        Path(args.output).write_bytes(data)
+        logger.info(f"Saved to {args.output}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Kyocera EDL flashing utility",
@@ -842,15 +914,15 @@ def main():
         epilog="""
 Examples:
   1. View GPT mapping and secureboot status:
-     python qdl.py info
+     python kedl.py info
   2. Dump entire eMMC:
-     python qdl.py dump --full -o full_emmc.img
+     python kedl.py dump --full -o full_emmc.img
   3. Dump a single partition:
-     python qdl.py dump -p system -o system.img
+     python kedl.py dump -p system -o system.img
   4. Flash a single partition:
-     python qdl.py flash -p system -i system.img
+     python kedl.py flash -p system -i system.img
   5. Flash an entire raw eMMC image:
-     python qdl.py flash --full -i full_emmc.img
+     python kedl.py flash --full -i full_emmc.img
         """
     )
     parser.add_argument("--vid", type=lambda x: int(x, 16), default="0x0482", help="USB Vendor ID in hex (default: 0x0482)")
@@ -929,6 +1001,21 @@ against a hardware-calculated checksum of the partition on the device.
     verify_parser.add_argument("-p", "--partition", required=True, help="Name of the partition to verify.")
     verify_parser.add_argument("-i", "--image", required=True, help="Path to the local image file to check against.")
 
+    # Action: Peek
+    peek_parser = subparsers.add_parser(
+        "peek",
+        help="Read the first N bytes of a raw eMMC sector (vendor cmd 0xA3).",
+        description="""
+[peek]
+Reads the first `count` bytes of eMMC sector `lba` using the Kyocera vendor
+0xA3 command - a lightweight alternative to a full 0xB9 sector read.
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    peek_parser.add_argument("--sector-lba", type=lambda x: int(x, 0), required=True, help="Sector (LBA) number to read from.")
+    peek_parser.add_argument("--count", type=lambda x: int(x, 0), default=16, help="Number of bytes to read from the start of the sector (default: 16).")
+    peek_parser.add_argument("-o", "--output", help="Optional path to save the raw bytes to.")
+
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
@@ -948,7 +1035,8 @@ against a hardware-calculated checksum of the partition on the device.
             "dump": handle_dump,
             "flash": handle_flash,
             "erase": handle_erase,
-            "verify": handle_verify
+            "verify": handle_verify,
+            "peek": handle_peek
         }
         dispatch_map[args.action](qdl, args)
     finally:
