@@ -11,11 +11,11 @@ Kyocera has implemented vendor commands in EDL, let's use them!
 ## What this tool can do:
 
 - Device Info: Read SecureBoot status and print the GPT.
-- Dump: Extract individual partitions or create full-disk (sector by sector) eMMC dumps.
-- Flashing: Flash specific partitions or flash a complete eMMC backup.
-- Hardware Operations: Clear write protection (`0xAB`), run region erasures (`0xA5`), and issue hardware resets (`0x0D`).
-- Integrity Verification: Calculate and compare local file dynamic checksums directly against hardware-calculated partition checksums (`0xA7`).
-- Sector Peek: Read an arbitrary byte count from the start of a raw eMMC sector (`0xA3`), without a full-sector aligned read.
+- Dump: Pull specific partitions or create full eMMC dump.
+- Flash: Flash specific partitions or flash a full eMMC backup.
+- Partition integrity verification: Compare local file checksums against hardware-calculated partition checksums (`0xA7`).
+- Sector peek: Read an arbitrary byte count from the start of a raw eMMC sector (`0xA3`), without a full-sector aligned read.
+- Hardware operations: Clear write protection (`0xAB`), run region erasures (`0xA5`), and issue hardware resets (`0x0D`).
 
 ---
 
@@ -70,11 +70,11 @@ It will connect with a device `KYOCERA_Android Android` and the notification LED
 
 6. Peek at the first N bytes of a raw sector:
 
-   `python kedl.py peek --lba 1 --count 32`
+   `python kedl.py peek --sector-lba 1 --count 32`
 
 > [!NOTE]
 > Your device may have a different VID/PID, and may not be detected. For such cases use `lsusb -v` to check your specific IDs.
-> For example on KYF31 the output is as such: `ID 0482:0a7f Kyocera Corp. KYOCERA_Android` which would mean you'd specify `--vid 0482 --pid 0a7f` in the commands. (this is the default VID/PID)
+> For example, on KYF31 the output is as such: `ID 0482:0a7f Kyocera Corp. KYOCERA_Android` which would mean you'd specify `--vid 0482 --pid 0a7f` in the commands. (this is the default VID/PID)
 
 ---
 

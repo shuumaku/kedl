@@ -494,9 +494,11 @@ class KyoceraSahara(Sahara):
 
 class Qdl:
 
-    # Max sectors per raw 0xB9/0xBA command. Declaring a larger size in a single
-    # command causes the device firmware to error out (Sahara END_TRANSFER)
-    PARTITION_CHUNK_SECTORS = 256
+    # Max sectors as per raw 0xB9 (read) command.
+    PARTITION_READ_CHUNK_SECTORS = 2048
+
+    # Max sectors as per raw 0xBA (write) command.
+    PARTITION_WRITE_CHUNK_SECTORS = 2048
 
     def __init__(self, vid: int, pid: int) -> None:
         self._vid = vid
@@ -575,7 +577,7 @@ class Qdl:
         remaining = sectors
         lba = first_lba
         while remaining > 0:
-            n = min(self.PARTITION_CHUNK_SECTORS, remaining)
+            n = min(self.PARTITION_READ_CHUNK_SECTORS, remaining)
             chunk = self._sahara.vendor_cmd_b9_read_raw(lba, n)
             if chunk is None:
                 logger.error(f'Failed reading partition {partition} at sector (lba) {lba} (n={n})')
@@ -602,7 +604,7 @@ class Qdl:
         sent_sectors = 0
         lba = first_lba
         while sent_sectors < total_sectors:
-            n = min(self.PARTITION_CHUNK_SECTORS, total_sectors - sent_sectors)
+            n = min(self.PARTITION_WRITE_CHUNK_SECTORS, total_sectors - sent_sectors)
             chunk = data[sent_sectors * 512:(sent_sectors + n) * 512]
             if not self._sahara.vendor_cmd_ba_write_raw(lba, chunk):
                 logger.error(f'Failed writing partition {partition} at sector (lba) {lba} (n={n})')
@@ -674,7 +676,7 @@ class Qdl:
     def is_secureboot_enabled(self) -> bool:
         return self._sahara.vendor_cmd_b5_read_secureboot()
 
-    def raw_dump_emmc(self, output_path: Path, total_sectors: int = 15269888, chunk_size: int = 256) -> bool:
+    def raw_dump_emmc(self, output_path: Path, total_sectors: int = 15269888, chunk_size: int = 2048) -> bool:
         logger.info("Starting full eMMC raw dump...")
         sectors_read = 0
         start_lba = 0
