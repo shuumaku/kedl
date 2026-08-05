@@ -1,4 +1,4 @@
-# KEDL
+# KY-EDL
 
 Kyocera has implemented vendor commands in EDL, let's use them!
 
@@ -13,9 +13,9 @@ Kyocera has implemented vendor commands in EDL, let's use them!
 - Device Info: Read SecureBoot status and print the GPT.
 - Dump: Pull specific partitions or create full eMMC dump.
 - Flash: Flash specific partitions or flash a full eMMC backup.
-- Partition integrity verification: Compare local file checksums against hardware-calculated partition checksums (`0xA7`).
-- Sector peek: Read an arbitrary byte count from the start of a raw eMMC sector (`0xA3`), without a full-sector aligned read.
-- Hardware operations: Clear write protection (`0xAB`), run region erasures (`0xA5`), and issue hardware resets (`0x0D`).
+- Partition integrity verification: Compare local file checksums against hardware-calculated partition checksums.
+- Sector peek: Read an arbitrary byte count from the start of a raw eMMC sector, without a full-sector aligned read.
+- Hardware operations: Clear write protection, run region erasures, and issue hardware resets.
 
 ---
 
@@ -50,37 +50,37 @@ It will connect with a device `KYOCERA_Android Android` and the notification LED
 
 1. View GPT mapping and secureboot status:
 
-   `python kedl.py info`
+   `python ky-edl.py info`
 
 2. Dump entire eMMC:
 
-   `python kedl.py dump --full -o full_emmc.img`
+   `python ky-edl.py dump --full -o full_emmc.img`
 
 3. Dump a single partition:
 
-   `python kedl.py dump -p system -o system.img`
+   `python ky-edl.py dump -p system -o system.img`
 
 4. Flash a single partition:
 
-   `python kedl.py flash -p system -i system.img`
+   `python ky-edl.py flash -p system -i system.img`
 
 5. Flash an entire raw eMMC image:
 
-   `python kedl.py flash --full -i full_emmc.img`
+   `python ky-edl.py flash --full -i full_emmc.img`
 
 6. Peek at the first N bytes of a raw sector:
 
-   `python kedl.py peek --sector-lba 1 --count 32`
+   `python ky-edl.py peek --sector-lba 1 --count 32`
 
 > [!NOTE]
 > Your device may have a different VID/PID, and may not be detected. For such cases use `lsusb -v` to check your specific IDs.
-> For example, on KYF31 the output is as such: `ID 0482:0a7f Kyocera Corp. KYOCERA_Android` which would mean you'd specify `--vid 0482 --pid 0a7f` in the commands. (this is the default VID/PID)
+> Default: VID is `0482` and PID is `0a7f`
 
 ---
 
 # Credits
 
-Original reverse engineering efforts, research and code by [@leobuskin](https://xdaforums.com/m/leobuskin.13248532/#recent-content).
+Original reverse engineering efforts, research and code by [@leobuskin](https://github.com/leobuskin) & [@ars18/@alltechdev](https://github.com/alltechdev) [link](https://forums.jtechforums.org/t/how-to-unlock-the-bootloader-an-root-kyocera-e4810-only/6167/121).
 
 This project uses code derived from or inspired by [bkerler/edl](https://github.com/bkerler/edl) by Bjoern Kerler, and as such is also licensed under GPLv3.
 

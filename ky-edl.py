@@ -19,7 +19,7 @@ from edl.sahara import (
 from edl.usblib import usb_class
 from edl.utils import structhelper_io
 
-logger = logging.getLogger('kedl')
+logger = logging.getLogger('ky-edl')
 
 
 class DataError(Exception):
@@ -538,9 +538,13 @@ class Qdl:
         self._parts.clear()
 
     def peek_sector(self, lba: int, count: int) -> Optional[bytes]:
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
         return self._sahara.vendor_cmd_a3_peek_sector(lba, count)
 
     def partition_checksum(self, partition: str) -> Optional[int]:
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
         if partition in self._parts:
             return self._sahara.vendor_cmd_a7_checksum(
                 self._parts[partition]["first_lba"],
@@ -550,6 +554,8 @@ class Qdl:
         return None
 
     def erase_partition(self, partition: str) -> bool:
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
         if partition in self._parts:
             return self._sahara.vendor_cmd_a5_erase_region(
                 self._parts[partition]["first_lba"],
@@ -559,6 +565,8 @@ class Qdl:
         return False
 
     def prepare_partition(self, partition: str) -> bool:
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
         if partition in self._parts:
             return self._sahara.vendor_cmd_ab_clear_write_protect(
                 self._parts[partition]["first_lba"],
@@ -568,6 +576,8 @@ class Qdl:
         return False
 
     def read_partition(self, partition: str) -> Optional[bytes]:
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
         if partition not in self._parts:
             logger.error(f'No such partition: {partition}')
             return None
@@ -588,6 +598,8 @@ class Qdl:
         return bytes(buf)
 
     def write_partition(self, partition: str, data: bytes, allow_padding: bool = False) -> bool:
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
         if partition not in self._parts:
             logger.error(f'No such partition: {partition}')
             return False
@@ -615,6 +627,8 @@ class Qdl:
 
     def read_gpt(self) -> int:
         """Reads the GPT and returns the total sector count of the eMMC disk."""
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
         self._parts.clear()
         boot_region = self._sahara.vendor_cmd_b9_read_raw(0, 34)
         if not boot_region or len(boot_region) < 1024:
@@ -674,7 +688,14 @@ class Qdl:
         return total_sectors
 
     def is_secureboot_enabled(self) -> bool:
-        return self._sahara.vendor_cmd_b5_read_secureboot()
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
+        resp = self._sahara.vendor_cmd_b5_read_secureboot()
+
+        if isinstance(resp, bool):
+            return resp
+
+        raise RuntimeError
 
     def raw_dump_emmc(self, output_path: Path, total_sectors: int = 15269888, chunk_size: int = 2048) -> bool:
         logger.info("Starting full eMMC raw dump...")
@@ -711,7 +732,9 @@ class Qdl:
             logger.error(f"Incomplete dump. Saved up to sector {sectors_read}.")
             return False
 
-    def raw_write_emmc(self, input_path: Path, chunk_sectors: int = 2048):
+    def raw_write_emmc(self, input_path: Path, chunk_sectors: int = 2048) -> bool:
+        if not self._sahara:
+            raise RuntimeError("Not initialized")
         if not input_path.exists():
             logger.error(f"Input image file does not exist: {input_path}")
             return False
@@ -951,15 +974,15 @@ def main():
         epilog="""
 Examples:
   1. View GPT mapping and secureboot status:
-     python kedl.py info
+     python3 ky-edl.py info
   2. Dump entire eMMC:
-     python kedl.py dump --full -o full_emmc.img
+     python3 ky-edl.py dump --full -o full_emmc.img
   3. Dump a single partition:
-     python kedl.py dump -p system -o system.img
+     python3 ky-edl.py dump -p system -o system.img
   4. Flash a single partition:
-     python kedl.py flash -p system -i system.img
+     python3 ky-edl.py flash -p system -i system.img
   5. Flash an entire raw eMMC image:
-     python kedl.py flash --full -i full_emmc.img
+     python3 ky-edl.py flash --full -i full_emmc.img
         """
     )
     parser.add_argument("--vid", type=lambda x: int(x, 16), default="0x0482", help="USB Vendor ID in hex (default: 0x0482)")
