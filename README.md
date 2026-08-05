@@ -3,7 +3,7 @@
 Kyocera has implemented vendor commands in EDL, let's use them!
 
 > [!WARNING]
-> The vendor commands are implemented inside SBL1, as such erasing it will render this tool useless.
+> The vendor SAHARA commands are implemented inside SBL1, as such erasing it **will render this tool useless.**
 
 > [!WARNING]
 > DO NOT ERASE RANDOM PARTITIONS. DO NOT DISCONNECT THE DEVICE WHEN A FLASHING PROCEDURE STARTED.
@@ -75,6 +75,19 @@ It will connect with a device `KYOCERA_Android Android` and the notification LED
 > [!NOTE]
 > Your device may have a different VID/PID, and may not be detected. For such cases use `lsusb -v` to check your specific IDs.
 > Default: VID is `0482` and PID is `0a7f`
+
+---
+
+# Devices
+
+Devices known to work with this tool:
+
+- [KYF31](https://garahowiki.com/phones:kyocera_gratina_4g)
+- [KYF42](https://garahowiki.com/phones:kyocera_gratina_kyf42)
+- [902KC/903KC](https://garahowiki.com/phones:kyocera_digno_keitai_3:start)
+- [E4810](https://garahowiki.com/phones:kyocera_duraxv_extreme)
+
+This tool is possible on a majority of _Qualcomm-based_ Kyocera devices.
 
 ---
 
