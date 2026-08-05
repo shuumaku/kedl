@@ -39,7 +39,7 @@ class CommandHandler:
             version=st.dword(),
             version_supported=st.dword(),
             cmd_packet_length=st.dword(),
-            mode=st.dword(),
+            mode=st.dword(), # type: ignore ; IntEnum 
             reserved1=st.dword(),
             reserved2=st.dword(),
             reserved3=st.dword(),
@@ -87,8 +87,7 @@ class CommandHandler:
 
 
 class Sahara:
-
-    def __init__(self, cdc) -> None:
+    def __init__(self, cdc: usb_class) -> None:
         self._cdc = cdc
         self._ch = CommandHandler()
         self._version = 2
@@ -99,7 +98,7 @@ class Sahara:
         v = self._cdc.read(length=0xC * 0x4, timeout=1)
         if len(v) > 1:
             pkt = self._ch.parse_pkt(v)
-            if pkt.cmd == SaharaCmd.HELLO_REQ:
+            if isinstance(pkt, HelloRequest) and (pkt.cmd == SaharaCmd.HELLO_REQ):
                 self._pkt_size = pkt.cmd_packet_length
                 self._version = pkt.version
                 logger.debug(f"RX: {pkt}")
@@ -171,29 +170,32 @@ class Sahara:
             return f'Error: {ErrorDesc[status]}'
         return 'Unknown error'
 
-    def cmd_exec(self, mcmd):  # CMD 0xD, RSP 0xE, CMD2 0xF
+    def cmd_exec(self, mcmd: SaharaExecCmd):  # CMD 0xD, RSP 0xE, CMD2 0xF
         # Send request
         data = struct.pack("<III", SaharaCmd.EXECUTE_REQ, 0xC, mcmd)
         self._cdc.write(data)
         # Get info about request
         res = self.get_rsp()
-        if res:
-            if res.cmd == SaharaCmd.EXECUTE_RSP:
-                data = struct.pack("<III", SaharaCmd.EXECUTE_DATA, 0xC, mcmd)
-                self._cdc.write(data)
-                payload = self._cdc.usbread(res.data_len)
-                return payload
-            elif res.cmd == SaharaCmd.END_TRANSFER:
-                logger.error(self.get_error_desc(res.image_tx_status))
-            else:
-                logger.warning(f"Unsupported command exec response: {res}")
-            return None
-        else:
+        if res is None:
             logger.warning(f"Empty command exec response: {res}")
-        return res
+            return res
 
-    def cmdexec_get_serial_num(self):
-        res = self.cmd_exec(SaharaExecCmd.SERIAL_NUM_READ)
+        if (isinstance(res, ExecuteResponse)) and (res.cmd == SaharaCmd.EXECUTE_RSP):
+            data = struct.pack("<III", SaharaCmd.EXECUTE_DATA, 0xC, mcmd)
+            self._cdc.write(data)
+            payload = self._cdc.usbread(res.data_len)
+            return payload
+        elif (isinstance(res, ImageEnd)) and (res.cmd == SaharaCmd.END_TRANSFER):
+            logger.error(self.get_error_desc(res.image_tx_status))
+        else:
+            logger.warning(f"Unsupported command exec response: {res}")
+        
+        return res
+        
+
+    def cmdexec_get_serial_num(self) -> int:
+        res: bytes = self.cmd_exec(SaharaExecCmd.SERIAL_NUM_READ) # type: ignore
+
         logger.info(f'Serial Number (bytes): {res} [{hexlify(res)}]')
         return int.from_bytes(res, 'little')
 
@@ -238,7 +240,7 @@ class KyoceraSahara(Sahara):
         length = min(self._cdc.maxsize, count or self._cdc.maxsize)
         for _ in range(attempts):
             try:
-                buf = bytes(self._cdc.EP_IN.read(length, timeout))
+                buf = bytes(self._cdc.EP_IN.read(length, timeout)) # type: ignore
             except Exception as e:
                 error = str(getattr(e, 'strerror', e))
                 if "timed out" not in error:
@@ -435,9 +437,9 @@ class KyoceraSahara(Sahara):
         total = len(data)
         while sent < total:
             chunk_size = min(total - sent, self.BA_CHUNK_SIZE)
-            actual = self._cdc.EP_OUT.write(data[sent:sent + chunk_size])
-            if actual == chunk_size and chunk_size % self._cdc.EP_OUT.wMaxPacketSize == 0:
-                self._cdc.EP_OUT.write(b'')  
+            actual = self._cdc.EP_OUT.write(data[sent:sent + chunk_size]) # type: ignore
+            if actual == chunk_size and chunk_size % self._cdc.EP_OUT.wMaxPacketSize == 0: # type: ignore
+                self._cdc.EP_OUT.write(b'') # type: ignore
             sent += actual
             logger.debug(f'Sent {sent}/{total} bytes')
 
@@ -542,16 +544,18 @@ class Qdl:
             raise RuntimeError("Not initialized")
         return self._sahara.vendor_cmd_a3_peek_sector(lba, count)
 
-    def partition_checksum(self, partition: str) -> Optional[int]:
+    def partition_checksum(self, partition: str) -> int:
         if not self._sahara:
             raise RuntimeError("Not initialized")
-        if partition in self._parts:
-            return self._sahara.vendor_cmd_a7_checksum(
-                self._parts[partition]["first_lba"],
-                self._parts[partition]["sectors"] * 512
-            )
-        logger.error(f'No such partition: {partition}')
-        return None
+        if partition not in self._parts:
+            logger.error(f'No such partition: {partition}')
+        resp = self._sahara.vendor_cmd_a7_checksum(
+            self._parts[partition]["first_lba"],
+            self._parts[partition]["sectors"] * 512
+        )
+        if resp is None:
+            raise RuntimeError("Failed to call checksum function")
+        return resp
 
     def erase_partition(self, partition: str) -> bool:
         if not self._sahara:
@@ -698,6 +702,9 @@ class Qdl:
         raise RuntimeError
 
     def raw_dump_emmc(self, output_path: Path, total_sectors: int = 15269888, chunk_size: int = 2048) -> bool:
+        if not self._sahara:
+            logger.error("Not initialized")
+            return False
         logger.info("Starting full eMMC raw dump...")
         sectors_read = 0
         start_lba = 0
@@ -795,7 +802,7 @@ def format_eta(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
-def checksum_file(filepath: str, offset: int = 0, length: int = None) -> int:
+def checksum_file(filepath: str, offset: int = 0, length: Optional[int] = None) -> int:
     file_path = Path(filepath)
     file_size = file_path.stat().st_size
 
@@ -840,7 +847,7 @@ def checksum_file(filepath: str, offset: int = 0, length: int = None) -> int:
     return checksum
 
 
-def handle_info(qdl: Qdl, args):
+def handle_info(qdl: Qdl, args: argparse.Namespace):
     sb_enabled = qdl.is_secureboot_enabled()
     
     sb_status = "Enforced" if sb_enabled else "Blown"
@@ -854,7 +861,7 @@ def handle_info(qdl: Qdl, args):
         print(f"{part['index']:<6} {part['name']:<20} {lba_range:<25} {part['sectors']:<12} {part['attrs']}")
 
 
-def handle_dump(qdl: Qdl, args):
+def handle_dump(qdl: Qdl, args: argparse.Namespace):
     output_img = Path(args.output)
     
     # We read the GPT in both paths to either get total disk sectors or individual partition parameters
@@ -883,7 +890,7 @@ def handle_dump(qdl: Qdl, args):
             logger.error("Failed to dump data from partition.")
 
 
-def handle_flash(qdl: Qdl, args):
+def handle_flash(qdl: Qdl, args: argparse.Namespace):
     input_file = Path(args.image)
     if not input_file.exists():
         logger.error(f"Input file does not exist: {input_file}")
@@ -919,7 +926,7 @@ def handle_flash(qdl: Qdl, args):
         logger.info("Flash completed successfully.")
     else:
         logger.error("Flashing routine failed.")
-def handle_erase(qdl: Qdl, args):
+def handle_erase(qdl: Qdl, args: argparse.Namespace):
     qdl.read_gpt()
     if args.partition not in qdl.partitions:
         logger.error(f"Partition '{args.partition}' not found in GPT mapping.")
@@ -931,7 +938,7 @@ def handle_erase(qdl: Qdl, args):
         logger.error("Erase routine failed.")
 
 
-def handle_verify(qdl: Qdl, args):
+def handle_verify(qdl: Qdl, args: argparse.Namespace):
     local_file = Path(args.image)
     if not local_file.exists():
         logger.error(f"Local target verification file does not exist: {local_file}")
@@ -953,7 +960,7 @@ def handle_verify(qdl: Qdl, args):
         print("RESULT: CRITICAL WARNING! Mismatched checksum profiles.")
 
 
-def handle_peek(qdl: Qdl, args):
+def handle_peek(qdl: Qdl, args: argparse.Namespace):
     data = qdl.peek_sector(args.sector_lba, args.count)
     if data is None:
         logger.error("Peek failed.")
