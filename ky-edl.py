@@ -13,17 +13,23 @@ from typing import Optional
 
 from edl.config.qualcomm_config import msmids
 from edl.sahara import (
-    CmdHeader, ErrorDesc, ExecuteResponse, HelloRequest, ImageEnd, SaharaCmd,
-    SaharaExecCmd, SaharaMode, SaharaPacket,
+    CmdHeader,
+    ErrorDesc,
+    ExecuteResponse,
+    HelloRequest,
+    ImageEnd,
+    SaharaCmd,
+    SaharaExecCmd,
+    SaharaMode,
+    SaharaPacket,
 )
 from edl.usblib import usb_class
 from edl.utils import structhelper_io
 
-logger = logging.getLogger('ky-edl')
+logger = logging.getLogger("ky-edl")
 
 
-class DataError(Exception):
-    ...
+class DataError(Exception): ...
 
 
 class CommandHandler:
@@ -39,7 +45,7 @@ class CommandHandler:
             version=st.dword(),
             version_supported=st.dword(),
             cmd_packet_length=st.dword(),
-            mode=st.dword(), # type: ignore ; IntEnum 
+            mode=st.dword(),  # type: ignore ; IntEnum
             reserved1=st.dword(),
             reserved2=st.dword(),
             reserved3=st.dword(),
@@ -103,7 +109,7 @@ class Sahara:
                 self._version = pkt.version
                 logger.debug(f"RX: {pkt}")
                 if self.cmd_info(self._version):
-                    logger.info(f'Serial Number: {self._serial}')
+                    logger.info(f"Serial Number: {self._serial}")
                     return True
                 return False
             else:
@@ -115,15 +121,35 @@ class Sahara:
 
     def disconnect(self) -> None:
         if self.cmd_reset():
-            logger.info('Sahara was successfully reset')
+            logger.info("Sahara was successfully reset")
         else:
-            logger.info('Sahara failed to reset')
+            logger.info("Sahara failed to reset")
 
-    def cmd_hello(self, mode: SaharaMode, version_min: int = 1, max_cmd_len: int = 0, version: int = 2):
-        """ CMD 0x1, RSP 0x2 """
+    def cmd_hello(
+        self,
+        mode: SaharaMode,
+        version_min: int = 1,
+        max_cmd_len: int = 0,
+        version: int = 2,
+    ):
+        """CMD 0x1, RSP 0x2"""
         cmd = SaharaCmd.HELLO_RSP
         length = 0x30
-        payload = struct.pack("<IIIIIIIIIIII", cmd, length, version, version_min, max_cmd_len, mode, 1, 2, 3, 4, 5, 6)
+        payload = struct.pack(
+            "<IIIIIIIIIIII",
+            cmd,
+            length,
+            version,
+            version_min,
+            max_cmd_len,
+            mode,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        )
         try:
             self._cdc.write(payload)
         except Exception as e:
@@ -135,8 +161,8 @@ class Sahara:
         try:
             self._cdc.write(struct.pack("<II", SaharaCmd.RESET_REQ, 0x8))
             logger.info("Reset command sent. Device is rebooting...")
-            
-            time.sleep(0.1) 
+
+            time.sleep(0.1)
             return True
         except Exception as e:
             logger.debug(f"USB connection severed during reset as expected: {e}")
@@ -145,7 +171,7 @@ class Sahara:
     def get_rsp(self):
         try:
             data = self._cdc.read()
-            if data == b'':
+            if data == b"":
                 return None
             return self._ch.parse_pkt(data)
         except Exception as e:
@@ -167,8 +193,8 @@ class Sahara:
     @staticmethod
     def get_error_desc(status):
         if status in ErrorDesc:
-            return f'Error: {ErrorDesc[status]}'
-        return 'Unknown error'
+            return f"Error: {ErrorDesc[status]}"
+        return "Unknown error"
 
     def cmd_exec(self, mcmd: SaharaExecCmd):  # CMD 0xD, RSP 0xE, CMD2 0xF
         # Send request
@@ -189,15 +215,14 @@ class Sahara:
             logger.error(self.get_error_desc(res.image_tx_status))
         else:
             logger.warning(f"Unsupported command exec response: {res}")
-        
+
         return res
-        
 
     def cmdexec_get_serial_num(self) -> int:
-        res: bytes = self.cmd_exec(SaharaExecCmd.SERIAL_NUM_READ) # type: ignore
+        res: bytes = self.cmd_exec(SaharaExecCmd.SERIAL_NUM_READ)  # type: ignore
 
-        logger.info(f'Serial Number (bytes): {res} [{hexlify(res)}]')
-        return int.from_bytes(res, 'little')
+        logger.info(f"Serial Number (bytes): {res} [{hexlify(res)}]")
+        return int.from_bytes(res, "little")
 
     def cmd_modeswitch(self, mode):
         data = struct.pack("<III", SaharaCmd.SWITCH_MODE, 0xC, mode)
@@ -230,22 +255,24 @@ class KyoceraSahara(Sahara):
     @classmethod
     def get_vendor_error_desc(cls, status: int) -> str:
         if status in cls.VendorErrorDesc:
-            return f'Vendor error: {cls.VendorErrorDesc[status]}'
+            return f"Vendor error: {cls.VendorErrorDesc[status]}"
         if status in ErrorDesc:
-            return f'Error: {ErrorDesc[status]}'
-        return f'Unknown vendor status: 0x{status:02X}'
+            return f"Error: {ErrorDesc[status]}"
+        return f"Unknown vendor status: 0x{status:02X}"
 
-    def drain_in(self, location: str, count: int = 0, attempts: int = 1, timeout: int = 1) -> Optional[bytes]:
+    def drain_in(
+        self, location: str, count: int = 0, attempts: int = 1, timeout: int = 1
+    ) -> Optional[bytes]:
         buffer = bytearray()
         length = min(self._cdc.maxsize, count or self._cdc.maxsize)
         for _ in range(attempts):
             try:
-                buf = bytes(self._cdc.EP_IN.read(length, timeout)) # type: ignore
+                buf = bytes(self._cdc.EP_IN.read(length, timeout))  # type: ignore
             except Exception as e:
-                error = str(getattr(e, 'strerror', e))
+                error = str(getattr(e, "strerror", e))
                 if "timed out" not in error:
                     if "Overflow" in error:
-                        logger.error(f'{location} drain_in USB overflow: {error}')
+                        logger.error(f"{location} drain_in USB overflow: {error}")
                     else:
                         logger.debug(error)
                     break
@@ -254,81 +281,93 @@ class KyoceraSahara(Sahara):
                 buffer.extend(buf)
         response = bytes(buffer)
         if response:
-            logger.warning(f'{location} drainage [{len(response)}]: {response}')
+            logger.warning(f"{location} drainage [{len(response)}]: {response}")
             return response
         return None
 
     def vendor_cmd_ab_clear_write_protect(self, lba: int, byte_count: int) -> bool:
-        logger.debug(f'vendor_cmd_ab_clear_write_protect: clearing write-protect for {byte_count} bytes from lba:{lba}')
-        self.drain_in('pre')
+        logger.debug(
+            f"vendor_cmd_ab_clear_write_protect: clearing write-protect for {byte_count} bytes from lba:{lba}"
+        )
+        self.drain_in("pre")
         data = struct.pack("<IIII", 0xAB, 16, lba, byte_count)
         if not self._cdc.write(data):
-            logger.error(f'failed to send data')
+            logger.error(f"failed to send data")
             return False
         resp = self._cdc.read(16)
         if len(resp) == 16:
             cmd_id = struct.unpack("<I", resp[0:4])[0]
             if cmd_id == 0xAC:
-                logger.info('Write-protect cleared')
+                logger.info("Write-protect cleared")
                 return True
             elif cmd_id == 0x04:
                 status = struct.unpack("<I", resp[12:16])[0]
-                logger.error(f'clear_write_protect error: {self.get_vendor_error_desc(status)}')
+                logger.error(
+                    f"clear_write_protect error: {self.get_vendor_error_desc(status)}"
+                )
                 return False
             else:
-                logger.warning(f'Unsupported response on clear_write_protect: {resp}')
+                logger.warning(f"Unsupported response on clear_write_protect: {resp}")
                 return False
         else:
-            logger.error(f'error: {resp}')
-        self.drain_in('post')
+            logger.error(f"error: {resp}")
+        self.drain_in("post")
         return False
 
     A7_CHUNK_BYTES = 8 * 1024 * 1024
     A7_MS_PER_MB = 1500
 
     def vendor_cmd_a7_checksum(self, lba: int, byte_count: int) -> Optional[int]:
-        logger.debug(f'vendor_cmd_a7_checksum: verifying {byte_count} bytes from lba:{lba}')
-        self.drain_in('pre')
+        logger.debug(
+            f"vendor_cmd_a7_checksum: verifying {byte_count} bytes from lba:{lba}"
+        )
+        self.drain_in("pre")
         result = 0
         remaining = byte_count
         current_lba = lba
         while remaining > 0:
             chunk = min(remaining, self.A7_CHUNK_BYTES, 0xFFFFFFFF)
-            chunk -= (chunk % 512)
+            chunk -= chunk % 512
             if chunk == 0:
                 chunk = 512
-            self.drain_in('process')
+            self.drain_in("process")
             data = struct.pack("<IIII", 0xA7, 16, current_lba, chunk)
             if not self._cdc.write(data):
-                logger.error(f'failed to send data')
+                logger.error(f"failed to send data")
                 return None
-            rsp = self._cdc.read(20, timeout=max(3000, min(60000, int(1000 + (chunk / (1024 * 1024)) * self.A7_MS_PER_MB))))
+            rsp = self._cdc.read(
+                20,
+                timeout=max(
+                    3000,
+                    min(60000, int(1000 + (chunk / (1024 * 1024)) * self.A7_MS_PER_MB)),
+                ),
+            )
             if len(rsp) == 20:
                 rid, rlen, rsp_lba, rsp_bytes, rsp_sum = struct.unpack("<IIIII", rsp)
                 if rid == 0xA8:
                     result = (result + rsp_sum) & 0xFFFFFFFF
                 else:
-                    logger.error(f'invalid response id: {rid} [{rsp}]')
+                    logger.error(f"invalid response id: {rid} [{rsp}]")
                     return None
             elif len(rsp) == 16:
                 status = struct.unpack("<I", rsp[12:16])[0]
-                logger.error(f'checksum error: {self.get_vendor_error_desc(status)}')
+                logger.error(f"checksum error: {self.get_vendor_error_desc(status)}")
                 return None
             else:
-                logger.error(f'invalid response length: {len(rsp)}')
+                logger.error(f"invalid response length: {len(rsp)}")
                 return None
             sectors_advanced = (chunk + 511) // 512
             current_lba += sectors_advanced
             remaining -= sectors_advanced * 512
-        self.drain_in('post')
+        self.drain_in("post")
         return result
 
     def vendor_cmd_b5_read_secureboot(self) -> Optional[bool]:
-        logger.debug('vendor_cmd_b5_read_secureboot: reading secureboot')
-        self.drain_in('pre')
+        logger.debug("vendor_cmd_b5_read_secureboot: reading secureboot")
+        self.drain_in("pre")
         data = struct.pack("<II", 0xB5, 8)
         if not self._cdc.write(data):
-            logger.error(f'failed to send data')
+            logger.error(f"failed to send data")
             return False
         resp = self._cdc.read(12)
         if len(resp) == 12:
@@ -336,17 +375,19 @@ class KyoceraSahara(Sahara):
             if rid == 0xB6:
                 return sb_status == 1
             else:
-                logger.error(f'error: {resp}')
+                logger.error(f"error: {resp}")
                 return None
-        logger.error(f'error: {resp}')
+        logger.error(f"error: {resp}")
         return None
 
     def vendor_cmd_b9_read_raw(self, lba: int, sectors: int) -> Optional[bytes]:
-        logger.debug(f'vendor_cmd_b9_read_raw: reading raw {sectors} sectors from lba:{lba}')
-        self.drain_in('pre')
+        logger.debug(
+            f"vendor_cmd_b9_read_raw: reading raw {sectors} sectors from lba:{lba}"
+        )
+        self.drain_in("pre")
         data = struct.pack("<IIII", 0xB9, 16, lba, sectors)
         if not self._cdc.write(data):
-            logger.error(f'failed to send data')
+            logger.error(f"failed to send data")
             return None
         total = sectors * 512
         first = True
@@ -354,37 +395,41 @@ class KyoceraSahara(Sahara):
         while len(buf) < total:
             tmp = self._cdc.read(min(total - len(buf), 1024 * 1024))
             if not tmp:
-                logger.error('read_raw: no data received, aborting to avoid a stuck loop')
+                logger.error(
+                    "read_raw: no data received, aborting to avoid a stuck loop"
+                )
                 return None
             if first and len(tmp) == 16:
                 pkt = self._ch.parse_pkt(tmp)
                 if pkt.cmd == SaharaCmd.END_TRANSFER:
-                    logger.error(f'read_raw error: {pkt}')
+                    logger.error(f"read_raw error: {pkt}")
                     return None
             first = False
             buf.extend(tmp)
-        post = self.drain_in('post', 0)
+        post = self.drain_in("post", 0)
         if post:
             if len(post) == 16:
                 pkt = self._ch.parse_pkt(post)
                 if pkt.cmd == SaharaCmd.END_TRANSFER:
-                    logger.error(f'read_raw error: {pkt}')
+                    logger.error(f"read_raw error: {pkt}")
                     return None
                 else:
-                    logger.warning(f'Unsupported response on read_raw: {pkt}')
+                    logger.warning(f"Unsupported response on read_raw: {pkt}")
                     return None
         return bytes(buf)
 
     def vendor_cmd_a5_erase_region(self, lba: int, sectors: int) -> bool:
-        logger.debug(f'vendor_cmd_a5_erase_region: erasing {sectors} sectors from lba:{lba}')
+        logger.debug(
+            f"vendor_cmd_a5_erase_region: erasing {sectors} sectors from lba:{lba}"
+        )
         end_lba = int(lba) + int(sectors) - 1
         if end_lba < int(lba):
             logger.error("vendor_cmd_a5_erase_region: computed end_lba < start_lba")
             return False
-        self.drain_in('pre')
+        self.drain_in("pre")
         data = struct.pack("<IIII", 0xA5, 16, lba, sectors)
         if not self._cdc.write(data):
-            logger.error(f'failed to send data')
+            logger.error(f"failed to send data")
             return False
         deadline = time.time() + 60.0
         while True:
@@ -400,7 +445,9 @@ class KyoceraSahara(Sahara):
             if code == 0x04 and rlen == 16:
                 status = p3
                 if status != 0:
-                    logger.error(f"Device reported error on 0xA5: {self.get_vendor_error_desc(status)}")
+                    logger.error(
+                        f"Device reported error on 0xA5: {self.get_vendor_error_desc(status)}"
+                    )
                     return False
                 continue
         return True
@@ -412,12 +459,14 @@ class KyoceraSahara(Sahara):
             logger.error("vendor_cmd_ba_write_raw: data length must be multiple of 512")
             return False
         sectors = len(data) // 512
-        logger.debug(f'vendor_cmd_ba_write_raw: writing raw {len(data)} bytes ({sectors} sectors) to lba:{lba}')
+        logger.debug(
+            f"vendor_cmd_ba_write_raw: writing raw {len(data)} bytes ({sectors} sectors) to lba:{lba}"
+        )
 
-        self.drain_in('pre')
+        self.drain_in("pre")
         payload = struct.pack("<IIII", 0xBA, 16, lba, sectors)
         if not self._cdc.write(payload):
-            logger.error(f'failed to send data')
+            logger.error(f"failed to send data")
             return False
 
         try:
@@ -429,19 +478,21 @@ class KyoceraSahara(Sahara):
             if len(resp) == 16:
                 cmd_id, rlen, p2, p3 = struct.unpack("<IIII", resp)
                 if cmd_id == 0x04 and p3 != 0x00:
-                    logger.error(f'write_ba error: {self.get_vendor_error_desc(p3)}')
+                    logger.error(f"write_ba error: {self.get_vendor_error_desc(p3)}")
                     return False
-                logger.info(f'0xBA ready hdr: id=0x{cmd_id:x} len={rlen} p2=0x{p2:x} p3=0x{p3:x}')
+                logger.info(
+                    f"0xBA ready hdr: id=0x{cmd_id:x} len={rlen} p2=0x{p2:x} p3=0x{p3:x}"
+                )
 
         sent = 0
         total = len(data)
         while sent < total:
             chunk_size = min(total - sent, self.BA_CHUNK_SIZE)
-            actual = self._cdc.EP_OUT.write(data[sent:sent + chunk_size]) # type: ignore
-            if actual == chunk_size and chunk_size % self._cdc.EP_OUT.wMaxPacketSize == 0: # type: ignore
-                self._cdc.EP_OUT.write(b'') # type: ignore
+            actual = self._cdc.EP_OUT.write(data[sent : sent + chunk_size])  # type: ignore
+            if actual == chunk_size and chunk_size % self._cdc.EP_OUT.wMaxPacketSize == 0:  # type: ignore
+                self._cdc.EP_OUT.write(b"")  # type: ignore
             sent += actual
-            logger.debug(f'Sent {sent}/{total} bytes')
+            logger.debug(f"Sent {sent}/{total} bytes")
 
         try:
             resp = self._cdc.read(timeout=6000)
@@ -452,44 +503,52 @@ class KyoceraSahara(Sahara):
             if len(resp) == 16:
                 cmd_id, rlen, p2, p3 = struct.unpack("<IIII", resp)
                 if cmd_id == 0x04:
-                    logger.error(f'write_ba error: {self.get_vendor_error_desc(p3)}')
+                    logger.error(f"write_ba error: {self.get_vendor_error_desc(p3)}")
                     return False
-                logger.info(f'0xBB ready hdr: id=0x{cmd_id:x} len={rlen} p2=0x{p2:x} p3=0x{p3:x}')
+                logger.info(
+                    f"0xBB ready hdr: id=0x{cmd_id:x} len={rlen} p2=0x{p2:x} p3=0x{p3:x}"
+                )
         return True
 
     def vendor_cmd_a3_peek_sector(self, lba: int, count: int) -> Optional[bytes]:
         """Read the first `count` bytes of eMMC sector
-        `lba`, starting at byte offset 0. 
-        
+        `lba`, starting at byte offset 0.
+
         Unlike 0xB9 (full sector reads),
         this returns an arbitrary byte count without full-sector alignment"""
-        logger.debug(f'vendor_cmd_a3_peek_sector: peeking {count} bytes from lba:{lba}')
-        self.drain_in('pre')
+        logger.debug(f"vendor_cmd_a3_peek_sector: peeking {count} bytes from lba:{lba}")
+        self.drain_in("pre")
         data = struct.pack("<IIII", 0xA3, 16, lba, count)
         if not self._cdc.write(data):
-            logger.error('failed to send data')
+            logger.error("failed to send data")
             return None
         try:
             resp = self._cdc.read(16 + count, timeout=max(1000, 200 + count))
         except Exception as e:
             logger.error(str(e))
             return None
-        extra = self.drain_in('post', 0)
+        extra = self.drain_in("post", 0)
         if extra:
             resp = resp + extra
         if len(resp) < 16:
-            logger.error(f'peek_sector error: short response {resp.hex() if resp else resp}')
+            logger.error(
+                f"peek_sector error: short response {resp.hex() if resp else resp}"
+            )
             return None
         rid, _, _, p3 = struct.unpack_from("<IIII", resp, 0)
         if rid == 0x04:
-            logger.error(f'peek_sector rejected: {self.get_vendor_error_desc(p3)}')
+            logger.error(f"peek_sector rejected: {self.get_vendor_error_desc(p3)}")
             return None
         if rid != 0xA4:
-            logger.warning(f'peek_sector: unexpected response id 0x{rid:X}: {resp.hex()}')
+            logger.warning(
+                f"peek_sector: unexpected response id 0x{rid:X}: {resp.hex()}"
+            )
             return None
-        body = resp[16:16 + count]
+        body = resp[16 : 16 + count]
         if len(body) < count:
-            logger.error(f'peek_sector: truncated body, got {len(body)} of {count} bytes')
+            logger.error(
+                f"peek_sector: truncated body, got {len(body)} of {count} bytes"
+            )
             return None
         return body
 
@@ -516,8 +575,8 @@ class Qdl:
     def connect(self) -> bool:
         try:
             self._cdc = usb_class([[self._vid, self._pid, -1]])
-            if self._cdc.connect(-1, -1, ''):
-                logger.info('Connected to the device')
+            if self._cdc.connect(-1, -1, ""):
+                logger.info("Connected to the device")
                 self._sahara = KyoceraSahara(self._cdc)
                 resp = self._sahara.connect()
                 if not resp:
@@ -536,7 +595,9 @@ class Qdl:
                 self._cdc.close(True)
             except Exception as e:
                 # Catching expected 'Entity not found' or disconnected bus errors during reset teardown
-                logger.debug(f"USB interface closed with expected disconnect state: {e}")
+                logger.debug(
+                    f"USB interface closed with expected disconnect state: {e}"
+                )
         self._parts.clear()
 
     def peek_sector(self, lba: int, count: int) -> Optional[bytes]:
@@ -548,10 +609,9 @@ class Qdl:
         if not self._sahara:
             raise RuntimeError("Not initialized")
         if partition not in self._parts:
-            logger.error(f'No such partition: {partition}')
+            logger.error(f"No such partition: {partition}")
         resp = self._sahara.vendor_cmd_a7_checksum(
-            self._parts[partition]["first_lba"],
-            self._parts[partition]["sectors"] * 512
+            self._parts[partition]["first_lba"], self._parts[partition]["sectors"] * 512
         )
         if resp is None:
             raise RuntimeError("Failed to call checksum function")
@@ -562,10 +622,9 @@ class Qdl:
             raise RuntimeError("Not initialized")
         if partition in self._parts:
             return self._sahara.vendor_cmd_a5_erase_region(
-                self._parts[partition]["first_lba"],
-                self._parts[partition]["sectors"]
+                self._parts[partition]["first_lba"], self._parts[partition]["sectors"]
             )
-        logger.error(f'No such partition: {partition}')
+        logger.error(f"No such partition: {partition}")
         return False
 
     def prepare_partition(self, partition: str) -> bool:
@@ -574,16 +633,16 @@ class Qdl:
         if partition in self._parts:
             return self._sahara.vendor_cmd_ab_clear_write_protect(
                 self._parts[partition]["first_lba"],
-                self._parts[partition]["sectors"] * 512
+                self._parts[partition]["sectors"] * 512,
             )
-        logger.error(f'No such partition: {partition}')
+        logger.error(f"No such partition: {partition}")
         return False
 
     def read_partition(self, partition: str) -> Optional[bytes]:
         if not self._sahara:
             raise RuntimeError("Not initialized")
         if partition not in self._parts:
-            logger.error(f'No such partition: {partition}')
+            logger.error(f"No such partition: {partition}")
             return None
         first_lba = self._parts[partition]["first_lba"]
         sectors = self._parts[partition]["sectors"]
@@ -594,25 +653,29 @@ class Qdl:
             n = min(self.PARTITION_READ_CHUNK_SECTORS, remaining)
             chunk = self._sahara.vendor_cmd_b9_read_raw(lba, n)
             if chunk is None:
-                logger.error(f'Failed reading partition {partition} at sector (lba) {lba} (n={n})')
+                logger.error(
+                    f"Failed reading partition {partition} at sector (lba) {lba} (n={n})"
+                )
                 return None
             buf.extend(chunk)
             lba += n
             remaining -= n
         return bytes(buf)
 
-    def write_partition(self, partition: str, data: bytes, allow_padding: bool = False) -> bool:
+    def write_partition(
+        self, partition: str, data: bytes, allow_padding: bool = False
+    ) -> bool:
         if not self._sahara:
             raise RuntimeError("Not initialized")
         if partition not in self._parts:
-            logger.error(f'No such partition: {partition}')
+            logger.error(f"No such partition: {partition}")
             return False
         expected_size = self._parts[partition]["sectors"] * 512
         if allow_padding and len(data) < expected_size:
-            data = data.ljust(expected_size, b'\x00')
-            logger.info(f'Padding partition {partition} to {len(data)} bytes')
+            data = data.ljust(expected_size, b"\x00")
+            logger.info(f"Padding partition {partition} to {len(data)} bytes")
         if len(data) % 512 != 0:
-            logger.error('write_partition: data size must be a multiple of 512 bytes')
+            logger.error("write_partition: data size must be a multiple of 512 bytes")
             return False
 
         first_lba = self._parts[partition]["first_lba"]
@@ -621,9 +684,11 @@ class Qdl:
         lba = first_lba
         while sent_sectors < total_sectors:
             n = min(self.PARTITION_WRITE_CHUNK_SECTORS, total_sectors - sent_sectors)
-            chunk = data[sent_sectors * 512:(sent_sectors + n) * 512]
+            chunk = data[sent_sectors * 512 : (sent_sectors + n) * 512]
             if not self._sahara.vendor_cmd_ba_write_raw(lba, chunk):
-                logger.error(f'Failed writing partition {partition} at sector (lba) {lba} (n={n})')
+                logger.error(
+                    f"Failed writing partition {partition} at sector (lba) {lba} (n={n})"
+                )
                 return False
             lba += n
             sent_sectors += n
@@ -636,18 +701,18 @@ class Qdl:
         self._parts.clear()
         boot_region = self._sahara.vendor_cmd_b9_read_raw(0, 34)
         if not boot_region or len(boot_region) < 1024:
-            raise RuntimeError('Could not read initial boot sector/GPT data')
-            
+            raise RuntimeError("Could not read initial boot sector/GPT data")
+
         gpt_hdr = boot_region[512:1024]
-        if gpt_hdr[:8] != b'EFI PART':
-            raise RuntimeError('No GPT signature at LBA1')
-            
-        # The Backup GPT LBA is stored at offset 0x20. 
+        if gpt_hdr[:8] != b"EFI PART":
+            raise RuntimeError("No GPT signature at LBA1")
+
+        # The Backup GPT LBA is stored at offset 0x20.
         # Since it is written to the final sector of the disk, (backup_lba + 1) gives total sectors.
         backup_gpt_lba = struct.unpack_from("<Q", gpt_hdr, 0x20)[0]
         total_sectors = backup_gpt_lba + 1
-        logger.info('Total eMMC sectors detected via GPT: %d', total_sectors)
-        
+        logger.info("Total eMMC sectors detected via GPT: %d", total_sectors)
+
         last_usable_lba = struct.unpack_from("<Q", gpt_hdr, 0x30)[0]
         entries_lba = struct.unpack_from("<Q", gpt_hdr, 72)[0]
         entries_count = struct.unpack_from("<I", gpt_hdr, 80)[0]
@@ -656,30 +721,36 @@ class Qdl:
 
         entries_bytes = entries_count * entry_size
         if (entries_lba + (entries_bytes + 511) // 512) * 512 <= len(boot_region):
-            entries_data = boot_region[entries_lba * 512:entries_lba * 512 + entries_bytes]
+            entries_data = boot_region[
+                entries_lba * 512 : entries_lba * 512 + entries_bytes
+            ]
         else:
-            entries_data = self._sahara.vendor_cmd_b9_read_raw(entries_lba, (entries_bytes + 511) // 512)
-            
+            entries_data = self._sahara.vendor_cmd_b9_read_raw(
+                entries_lba, (entries_bytes + 511) // 512
+            )
+
         if not entries_data:
-            raise RuntimeError('Failed reading GPT entry array data')
-            
+            raise RuntimeError("Failed reading GPT entry array data")
+
         calc_crc = binascii.crc32(entries_data[:entries_bytes]) & 0xFFFFFFFF
         if entries_crc != calc_crc:
-            raise RuntimeError(f'GPT entries crc does not match, r:{entries_crc:08X} c:{calc_crc:08X}')
+            raise RuntimeError(
+                f"GPT entries crc does not match, r:{entries_crc:08X} c:{calc_crc:08X}"
+            )
 
         for i in range(entries_count):
             off = i * entry_size
-            ent = entries_data[off:off + entry_size]
+            ent = entries_data[off : off + entry_size]
             if not ent or ent == b"\x00" * entry_size:
                 continue
             first_lba = struct.unpack_from("<Q", ent, 32)[0]
             last_lba = struct.unpack_from("<Q", ent, 40)[0]
             attrs = struct.unpack_from("<Q", ent, 48)[0]
-            name_utf16 = ent[56:56 + 72]
+            name_utf16 = ent[56 : 56 + 72]
             try:
                 name = name_utf16.decode("utf-16le").rstrip("\x00")
             except Exception:
-                name = f'__unknown_partition_{i}__'
+                name = f"__unknown_partition_{i}__"
             sectors = (last_lba - first_lba + 1) if last_lba >= first_lba else 0
             self._parts[name] = {
                 "index": i,
@@ -701,7 +772,9 @@ class Qdl:
 
         raise RuntimeError
 
-    def raw_dump_emmc(self, output_path: Path, total_sectors: int = 15269888, chunk_size: int = 2048) -> bool:
+    def raw_dump_emmc(
+        self, output_path: Path, total_sectors: int = 15269888, chunk_size: int = 2048
+    ) -> bool:
         if not self._sahara:
             logger.error("Not initialized")
             return False
@@ -719,18 +792,27 @@ class Qdl:
                 elapsed = time.time() - start_time
                 sec_per_s = sectors_read / elapsed if elapsed > 0 else 0
                 mb_per_s = sec_per_s * 512 / (1024 * 1024)
-                eta = (total_sectors - sectors_read) / sec_per_s if sec_per_s > 0 else float('inf')
-                print(f"  Read progress: {pct:.2f}% ({sectors_read}/{total_sectors} sectors) | LBA: {current_lba} | "
-                      f"{sec_per_s:.0f} sectors/s ({mb_per_s:.2f} MB/s) | ETA: {format_eta(eta)}", end="\r")
-                
+                eta = (
+                    (total_sectors - sectors_read) / sec_per_s
+                    if sec_per_s > 0
+                    else float("inf")
+                )
+                print(
+                    f"  Read progress: {pct:.2f}% ({sectors_read}/{total_sectors} sectors) | LBA: {current_lba} | "
+                    f"{sec_per_s:.0f} sectors/s ({mb_per_s:.2f} MB/s) | ETA: {format_eta(eta)}",
+                    end="\r",
+                )
+
                 chunk = self._sahara.vendor_cmd_b9_read_raw(current_lba, to_read)
                 if chunk is None:
-                    print(f"\n  [ERROR] Failed to read chunk at LBA {current_lba}. Dump aborted.")
+                    print(
+                        f"\n  [ERROR] Failed to read chunk at LBA {current_lba}. Dump aborted."
+                    )
                     break
-                    
+
                 f.write(chunk)
                 sectors_read += to_read
-                
+
         if sectors_read == total_sectors:
             print(f"\n  Progress: 100.00% ({total_sectors}/{total_sectors} sectors)")
             logger.info(f"Successfully dumped entire eMMC to {output_path}")
@@ -748,12 +830,16 @@ class Qdl:
 
         file_size = input_path.stat().st_size
         if file_size % 512 != 0:
-            logger.error("Input raw image size must be a strict multiple of 512 bytes (sector aligned).")
+            logger.error(
+                "Input raw image size must be a strict multiple of 512 bytes (sector aligned)."
+            )
             return False
 
         total_sectors = file_size // 512
-        logger.info(f"Preparing full eMMC restoration: {file_size} bytes ({total_sectors} sectors)")
-        
+        logger.info(
+            f"Preparing full eMMC restoration: {file_size} bytes ({total_sectors} sectors)"
+        )
+
         self._sahara.vendor_cmd_ab_clear_write_protect(0, file_size)
 
         sectors_written = 0
@@ -772,18 +858,29 @@ class Qdl:
                 elapsed = time.time() - start_time
                 sec_per_s = sectors_written / elapsed if elapsed > 0 else 0
                 mb_per_s = sec_per_s * 512 / (1024 * 1024)
-                eta = (total_sectors - sectors_written) / sec_per_s if sec_per_s > 0 else float('inf')
-                print(f"  Flash progress: {pct:.2f}% ({sectors_written}/{total_sectors} sectors) | LBA: {current_lba} | "
-                      f"{sec_per_s:.0f} sectors/s ({mb_per_s:.2f} MB/s) | ETA: {format_eta(eta)}", end="\r")
+                eta = (
+                    (total_sectors - sectors_written) / sec_per_s
+                    if sec_per_s > 0
+                    else float("inf")
+                )
+                print(
+                    f"  Flash progress: {pct:.2f}% ({sectors_written}/{total_sectors} sectors) | LBA: {current_lba} | "
+                    f"{sec_per_s:.0f} sectors/s ({mb_per_s:.2f} MB/s) | ETA: {format_eta(eta)}",
+                    end="\r",
+                )
 
                 if not self._sahara.vendor_cmd_ba_write_raw(current_lba, data_chunk):
-                    print(f"\n  [ERROR] Failed flashing raw sector array sequence at LBA {current_lba}. Restoration aborted.")
+                    print(
+                        f"\n  [ERROR] Failed flashing raw sector array sequence at LBA {current_lba}. Restoration aborted."
+                    )
                     return False
-                
+
                 sectors_written += actual_sectors
 
         if sectors_written == total_sectors:
-            print(f"\n  Flash Progress: 100.00% ({total_sectors}/{total_sectors} sectors)")
+            print(
+                f"\n  Flash Progress: 100.00% ({total_sectors}/{total_sectors} sectors)"
+            )
             logger.info("Successfully restored target eMMC raw storage container.")
             return True
         else:
@@ -792,7 +889,7 @@ class Qdl:
 
 
 def format_eta(seconds: float) -> str:
-    if seconds <= 0 or seconds == float('inf'):
+    if seconds <= 0 or seconds == float("inf"):
         return "--:--"
     seconds = int(seconds)
     h, rem = divmod(seconds, 3600)
@@ -817,7 +914,7 @@ def checksum_file(filepath: str, offset: int = 0, length: Optional[int] = None) 
     if length == 0:
         return 0
 
-    with open(filepath, 'rb') as f:
+    with open(filepath, "rb") as f:
         with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
             chunk_size = 65536
             checksum = 0
@@ -831,14 +928,14 @@ def checksum_file(filepath: str, offset: int = 0, length: Optional[int] = None) 
                 i = 0
                 chunk_len = len(chunk)
                 while i + 4 <= chunk_len:
-                    dword = int.from_bytes(chunk[i:i + 4], 'little')
+                    dword = int.from_bytes(chunk[i : i + 4], "little")
                     checksum = (checksum + dword) & 0xFFFFFFFF
                     i += 4
 
                 if chunk_end == end and i < chunk_len:
                     remaining = chunk_len - i
-                    last_bytes = chunk[i:] + b'\x00' * (4 - remaining)
-                    last_dword = int.from_bytes(last_bytes[:4], 'little')
+                    last_bytes = chunk[i:] + b"\x00" * (4 - remaining)
+                    last_dword = int.from_bytes(last_bytes[:4], "little")
                     mask = (1 << (remaining * 8)) - 1
                     checksum = (checksum + (last_dword & mask)) & 0xFFFFFFFF
 
@@ -849,21 +946,25 @@ def checksum_file(filepath: str, offset: int = 0, length: Optional[int] = None) 
 
 def handle_info(qdl: Qdl, args: argparse.Namespace):
     sb_enabled = qdl.is_secureboot_enabled()
-    
+
     sb_status = "Enforced" if sb_enabled else "Blown"
     print(f"Secure boot status: {sb_status}")
 
     qdl.read_gpt()
-    print(f"{'Index':<6} {'Partition Name':<20} {'LBA Range':<25} {'Sectors':<12} {'Attributes'}")
+    print(
+        f"{'Index':<6} {'Partition Name':<20} {'LBA Range':<25} {'Sectors':<12} {'Attributes'}"
+    )
     print("-" * 75)
     for part in qdl.partitions.values():
         lba_range = f"{part['first_lba']}-{part['last_lba']}"
-        print(f"{part['index']:<6} {part['name']:<20} {lba_range:<25} {part['sectors']:<12} {part['attrs']}")
+        print(
+            f"{part['index']:<6} {part['name']:<20} {lba_range:<25} {part['sectors']:<12} {part['attrs']}"
+        )
 
 
 def handle_dump(qdl: Qdl, args: argparse.Namespace):
     output_img = Path(args.output)
-    
+
     # We read the GPT in both paths to either get total disk sectors or individual partition parameters
     try:
         total_sectors = qdl.read_gpt()
@@ -875,13 +976,17 @@ def handle_dump(qdl: Qdl, args: argparse.Namespace):
         qdl.raw_dump_emmc(output_img, total_sectors=total_sectors)
     else:
         if not args.partition:
-            logger.error("Error: --partition name required unless doing a --full disk dump")
+            logger.error(
+                "Error: --partition name required unless doing a --full disk dump"
+            )
             return
         if args.partition not in qdl.partitions:
             logger.error(f"Partition '{args.partition}' not found in GPT mapping.")
             return
         part = qdl.partitions[args.partition]
-        logger.info(f"Dumping partition '{args.partition}' ({part['sectors']} sectors)...")
+        logger.info(
+            f"Dumping partition '{args.partition}' ({part['sectors']} sectors)..."
+        )
         data = qdl.read_partition(args.partition)
         if data is not None:
             output_img.write_bytes(data)
@@ -895,11 +1000,13 @@ def handle_flash(qdl: Qdl, args: argparse.Namespace):
     if not input_file.exists():
         logger.error(f"Input file does not exist: {input_file}")
         return
-        
+
     try:
         qdl.read_gpt()
     except Exception as e:
-        logger.error(f"Failed parsing GPT configuration data ahead of flashing process: {e}")
+        logger.error(
+            f"Failed parsing GPT configuration data ahead of flashing process: {e}"
+        )
         return
 
     if args.full:
@@ -907,25 +1014,31 @@ def handle_flash(qdl: Qdl, args: argparse.Namespace):
         return
 
     if not args.partition:
-        logger.error("Error: --partition name target configuration required unless choosing --full eMMC flashing strategies.")
+        logger.error(
+            "Error: --partition name target configuration required unless choosing --full eMMC flashing strategies."
+        )
         return
 
     if args.partition not in qdl.partitions:
         logger.error(f"Partition '{args.partition}' not found in GPT mapping.")
         return
-        
+
     data = input_file.read_bytes()
-    
+
     if args.clear_wp:
         qdl.prepare_partition(args.partition)
     if args.erase:
         qdl.erase_partition(args.partition)
-        
-    logger.info(f"Flashing {input_file.name} directly into partition '{args.partition}'...")
+
+    logger.info(
+        f"Flashing {input_file.name} directly into partition '{args.partition}'..."
+    )
     if qdl.write_partition(args.partition, data, allow_padding=args.pad):
         logger.info("Flash completed successfully.")
     else:
         logger.error("Flashing routine failed.")
+
+
 def handle_erase(qdl: Qdl, args: argparse.Namespace):
     qdl.read_gpt()
     if args.partition not in qdl.partitions:
@@ -951,7 +1064,7 @@ def handle_verify(qdl: Qdl, args: argparse.Namespace):
     logger.info(f"Calculating dynamic checksums for verification...")
     local_crc = hex(checksum_file(str(local_file)))
     remote_crc = hex(qdl.partition_checksum(args.partition))
-    
+
     print(f"Local Image CRC  : {local_crc}")
     print(f"Device Partition CRC: {remote_crc}")
     if local_crc == remote_crc:
@@ -965,7 +1078,7 @@ def handle_peek(qdl: Qdl, args: argparse.Namespace):
     if data is None:
         logger.error("Peek failed.")
         return
-    ascii_repr = ''.join(chr(b) if 32 <= b < 127 else '.' for b in data)
+    ascii_repr = "".join(chr(b) if 32 <= b < 127 else "." for b in data)
     print(f"Sector (LBA) {args.sector_lba}, {len(data)} bytes:")
     print(data.hex())
     print(f"ascii: {ascii_repr}")
@@ -990,83 +1103,134 @@ Examples:
      python3 ky-edl.py flash -p system -i system.img
   5. Flash an entire raw eMMC image:
      python3 ky-edl.py flash --full -i full_emmc.img
-        """
+        """,
     )
-    parser.add_argument("--vid", type=lambda x: int(x, 16), default="0x0482", help="USB Vendor ID in hex (default: 0x0482)")
-    parser.add_argument("--pid", type=lambda x: int(x, 16), default="0x0a7f", help="USB Product ID in hex (default: 0x0a7f)")
-    parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging for low-level Sahara commands")
-    
-    subparsers = parser.add_subparsers(dest="action", required=True, help="Command to execute")
+    parser.add_argument(
+        "--vid",
+        type=lambda x: int(x, 16),
+        default="0x0482",
+        help="USB Vendor ID in hex (default: 0x0482)",
+    )
+    parser.add_argument(
+        "--pid",
+        type=lambda x: int(x, 16),
+        default="0x0a7f",
+        help="USB Product ID in hex (default: 0x0a7f)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug logging for low-level Sahara commands",
+    )
+
+    subparsers = parser.add_subparsers(
+        dest="action", required=True, help="Command to execute"
+    )
 
     # Action: Info
     subparsers.add_parser(
-        "info", 
+        "info",
         help="Show device status and the GPT partition table map.",
         description="""
 [info] 
 Check SecureBoot bit, and reads the GUID Partition Table (GPT) map.
         """,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-# Action: Dump
+    # Action: Dump
     dump_parser = subparsers.add_parser(
-        "dump", 
+        "dump",
         help="Dump data from the device and save it to a local file.",
         description="""
 [dump] 
 Reads data from the eMMC chip via Kyocera modifed Sahara commands. Can dump a specific 
 partition by name or dump the entire raw eMMC.
         """,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    dump_parser.add_argument("-o", "--output", required=True, help="Path to save the output image file.")
+    dump_parser.add_argument(
+        "-o", "--output", required=True, help="Path to save the output image file."
+    )
     dump_parser.add_argument("-p", "--partition", help="Name of the partition to dump.")
-    dump_parser.add_argument("--full", action="store_true", help="Dump the entire eMMC.")
+    dump_parser.add_argument(
+        "--full", action="store_true", help="Dump the entire eMMC."
+    )
 
     # Action: Flash
     flash_parser = subparsers.add_parser(
-        "flash", 
+        "flash",
         help="Write a local image file to a partition or flash the entire eMMC.",
         description="""
         
 [flash] 
 Writes local binary files onto the device eMMC.
         """,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    flash_parser.add_argument("-i", "--image", required=True, help="Path to image/binary file.")
-    flash_parser.add_argument("-p", "--partition", help="Name of the target partition to overwrite (omit if using --full).")
-    flash_parser.add_argument("--full", action="store_true", help="Overwrite the ENTIRE eMMC starting at LBA 0.")
-    flash_parser.add_argument("--clear-wp", action="store_true", help="Attempt to strip hardware write protection from target sectors before flashing.")
-    flash_parser.add_argument("--erase", action="store_true", help="Erase target blocks clean before writing data payloads.")
-    flash_parser.add_argument("--pad", action="store_true", help="Pad the input file with trailing zeros to match sector alignment boundaries.")
+    flash_parser.add_argument(
+        "-i", "--image", required=True, help="Path to image/binary file."
+    )
+    flash_parser.add_argument(
+        "-p",
+        "--partition",
+        help="Name of the target partition to overwrite (omit if using --full).",
+    )
+    flash_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Overwrite the ENTIRE eMMC starting at LBA 0.",
+    )
+    flash_parser.add_argument(
+        "--clear-wp",
+        action="store_true",
+        help="Attempt to strip hardware write protection from target sectors before flashing.",
+    )
+    flash_parser.add_argument(
+        "--erase",
+        action="store_true",
+        help="Erase target blocks clean before writing data payloads.",
+    )
+    flash_parser.add_argument(
+        "--pad",
+        action="store_true",
+        help="Pad the input file with trailing zeros to match sector alignment boundaries.",
+    )
 
     # Action: Erase
     erase_parser = subparsers.add_parser(
-        "erase", 
+        "erase",
         help="Erase and wipe a specified partition.",
         description="""
 [erase] 
 Erase partition by filling it with zeroes.
         """,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    erase_parser.add_argument("-p", "--partition", required=True, help="Name of the partition to erase.")
+    erase_parser.add_argument(
+        "-p", "--partition", required=True, help="Name of the partition to erase."
+    )
 
     # Action: Verify
     verify_parser = subparsers.add_parser(
-        "verify", 
+        "verify",
         help="Verify a partition's integrity against a local image file.",
         description="""
 [verify] 
 Calculates the checksum of a local file and compares it directly 
 against a hardware-calculated checksum of the partition on the device.
         """,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    verify_parser.add_argument("-p", "--partition", required=True, help="Name of the partition to verify.")
-    verify_parser.add_argument("-i", "--image", required=True, help="Path to the local image file to check against.")
+    verify_parser.add_argument(
+        "-p", "--partition", required=True, help="Name of the partition to verify."
+    )
+    verify_parser.add_argument(
+        "-i",
+        "--image",
+        required=True,
+        help="Path to the local image file to check against.",
+    )
 
     # Action: Peek
     peek_parser = subparsers.add_parser(
@@ -1077,20 +1241,36 @@ against a hardware-calculated checksum of the partition on the device.
 Reads the first `count` bytes of eMMC sector `lba` using the vendor
 0xA3 command - a lightweight alternative to a full 0xB9 sector read.
         """,
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    peek_parser.add_argument("--sector-lba", type=lambda x: int(x, 0), required=True, help="Sector (LBA) number to read from.")
-    peek_parser.add_argument("--count", type=lambda x: int(x, 0), default=16, help="Number of bytes to read from the start of the sector (default: 16).")
-    peek_parser.add_argument("-o", "--output", help="Optional path to save the raw bytes to.")
+    peek_parser.add_argument(
+        "--sector-lba",
+        type=lambda x: int(x, 0),
+        required=True,
+        help="Sector (LBA) number to read from.",
+    )
+    peek_parser.add_argument(
+        "--count",
+        type=lambda x: int(x, 0),
+        default=16,
+        help="Number of bytes to read from the start of the sector (default: 16).",
+    )
+    peek_parser.add_argument(
+        "-o", "--output", help="Optional path to save the raw bytes to."
+    )
 
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
 
     qdl = Qdl(args.vid, args.pid)
-    
-    print(f"Waiting for device (VID: 0x{args.vid:04x}, PID: 0x{args.pid:04x})... Connect device now.")
+
+    print(
+        f"Waiting for device (VID: 0x{args.vid:04x}, PID: 0x{args.pid:04x})... Connect device now."
+    )
     while not qdl.connect():
         print("Device not found. Retrying...", end="\r")
         time.sleep(2)
@@ -1103,12 +1283,13 @@ Reads the first `count` bytes of eMMC sector `lba` using the vendor
             "flash": handle_flash,
             "erase": handle_erase,
             "verify": handle_verify,
-            "peek": handle_peek
+            "peek": handle_peek,
         }
         dispatch_map[args.action](qdl, args)
     finally:
         print("\n")
         qdl.disconnect()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
